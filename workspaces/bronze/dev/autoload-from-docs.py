@@ -44,6 +44,11 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC # You Must first run the next two code cells----
+
+# COMMAND ----------
+
 from pyspark.sql.functions import input_file_name, current_timestamp
 
 secret_scope = "adbdev"
@@ -79,6 +84,54 @@ print(file_path)
 # Now you can read data from Azure Storage with abfss protocol
 df = spark.read.csv(f"abfss://{container}@{storage_account_name}.dfs.core.windows.net/{directory}/events.csv")
 # display(df)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## This is a storage queue based trigger
+
+# COMMAND ----------
+
+# for this section -- clear the queue first ---
+
+# Import functions
+from pyspark.sql.functions import col, current_timestamp
+
+# Define variables used in code below
+# file_path = "/databricks-datasets/structured-streaming/events"
+username = spark.sql("SELECT regexp_replace(current_user(), '[^a-zA-Z0-9]', '_')").first()[0]
+table_name = f"{username}_etl_queue_quickstart"
+checkpoint_path = f"/tmp/{username}/_checkpoint/etl_queue_quickstart"
+print(checkpoint_path)
+
+# Clear out data from previous demo execution
+# comment out these two lines to allow continous append
+spark.sql(f"DROP TABLE IF EXISTS {table_name}")
+dbutils.fs.rm(checkpoint_path, True)
+
+(spark.readStream
+  .format("cloudFiles")
+  .option("cloudFiles.format", "csv")
+  .option("cloudFiles.schemaLocation", checkpoint_path)
+  .option("cloudFiles.useNotifications", "true")  # Use notification-based triggering
+  .option("cloudFiles.queueName", "newfile")  # Event Grid queue for notifications
+  .option("cloudFiles.subscriptionId", subscription_id)
+  .option("cloudFiles.tenantId", tenant_id)
+  .option("cloudFiles.clientId", client_id)
+  .option("cloudFiles.clientSecret", client_secret)
+  .load(drop_path)
+  .select("*", col("_metadata.file_path").alias("source_file"), current_timestamp().alias("processing_time"))
+  .writeStream
+  .option("checkpointLocation", checkpoint_path)
+  .trigger(availableNow=True)
+  .toTable(table_name))
+
+
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Run this cell for a "file listing" based trigger....
 
 # COMMAND ----------
 
